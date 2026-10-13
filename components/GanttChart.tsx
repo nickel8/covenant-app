@@ -3,26 +3,28 @@
 import { useRef, useState } from "react";
 
 // ── SVG coordinate space ──────────────────────────────────
-const SVG_W = 900;
-const LABEL_W = 185;
-const TL_W = SVG_W - LABEL_W; // 715
-const ROW_H = 50;
+const SVG_W    = 900;
+const LABEL_W  = 185;
+const TL_W     = SVG_W - LABEL_W; // 715
+const ROW_H    = 50;
 const HEADER_H = 38;
-const BAR_H = 22;
+const BAR_H    = 22;
 const HANDLE_W = 10;
 
 // Literal brand colours (CSS vars don't work in SVG fill= attrs)
-const C_BRAND   = "#1C3253";
-const C_ACCENT  = "#2F5FB3";
-const C_BORDER  = "#DDD9D0";
-const C_SUNK    = "#F1EFEA";
-const C_MUTED   = "#888888";
-const C_TEXT    = "#111111";
-const C_STRIPE  = "#F8F7F6";
+const C_BRAND  = "#1C3253";
+const C_ACCENT = "#2F5FB3";
+const C_BORDER = "#DDD9D0";
+const C_SUNK   = "#F1EFEA";
+const C_MUTED  = "#888888";
+const C_TEXT   = "#111111";
+const C_STRIPE = "#F8F7F6";
+const C_OK     = "#1A6B45";   // RACI complete (R + A both set)
+const C_RISK   = "#92400E";   // RACI partial (only R or A)
 
 // ── Date utils ────────────────────────────────────────────
-function parse(iso: string): Date { return new Date(iso + "T00:00:00"); }
-function iso(d: Date): string { return d.toISOString().slice(0, 10); }
+function parse(iso: string): Date  { return new Date(iso + "T00:00:00"); }
+function iso(d: Date): string      { return d.toISOString().slice(0, 10); }
 function addDays(d: Date, n: number): Date { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
 function daysBetween(a: Date, b: Date): number { return Math.round((b.getTime() - a.getTime()) / 86400000); }
 function fmtShort(d: Date): string { return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }); }
@@ -30,19 +32,21 @@ function fmtMonthYear(d: Date): string { return d.toLocaleDateString("en-GB", { 
 
 // ── Props ─────────────────────────────────────────────────
 interface Props {
-  milestones: { id: string; label: string }[];
-  dates: Record<string, string>;
-  onChange: (dates: Record<string, string>) => void;
+  milestones:  { id: string; label: string }[];
+  dates:       Record<string, string>;
+  raci?:       Record<string, Record<string, string | null>>;
+  onBarClick?: (id: string) => void;
+  onChange:    (dates: Record<string, string>) => void;
 }
 
-export default function GanttChart({ milestones, dates, onChange }: Props) {
-  const svgRef = useRef<SVGSVGElement>(null);
+export default function GanttChart({ milestones, dates, raci, onBarClick, onChange }: Props) {
+  const svgRef  = useRef<SVGSVGElement>(null);
   const dragRef = useRef<{ id: string; startTlX: number; startDate: Date } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [hoveredId, setHoveredId]   = useState<string | null>(null);
 
   // ── Range ───────────────────────────────────────────────
-  const milDates = milestones.map((m) => parse(dates[m.id]));
+  const milDates   = milestones.map((m) => parse(dates[m.id]));
   const rangeStart = addDays(milDates[0], -7);
   const rangeEnd   = addDays(milDates[milDates.length - 1], 18);
   const totalDays  = daysBetween(rangeStart, rangeEnd);
@@ -55,6 +59,7 @@ export default function GanttChart({ milestones, dates, onChange }: Props) {
   function tlXToDate(tlX: number): Date {
     return addDays(rangeStart, Math.round((tlX / TL_W) * totalDays));
   }
+  void tlXToDate; // referenced via drag handler below
   function clientToTlX(clientX: number): number {
     if (!svgRef.current) return 0;
     const { left, width } = svgRef.current.getBoundingClientRect();
@@ -91,13 +96,13 @@ export default function GanttChart({ milestones, dates, onChange }: Props) {
   function onSvgMove(e: React.PointerEvent<SVGSVGElement>) {
     const drag = dragRef.current;
     if (!drag) return;
-    const dx = clientToTlX(e.clientX) - drag.startTlX;
+    const dx    = clientToTlX(e.clientX) - drag.startTlX;
     const delta = Math.round((dx / TL_W) * totalDays);
     const newDate = addDays(drag.startDate, delta);
 
     const idx = milestones.findIndex((m) => m.id === drag.id);
-    const lo = idx > 0 ? addDays(parse(dates[milestones[idx - 1].id]), 1) : addDays(rangeStart, 1);
-    const hi = idx < milestones.length - 1 ? addDays(parse(dates[milestones[idx + 1].id]), -1) : rangeEnd;
+    const lo  = idx > 0 ? addDays(parse(dates[milestones[idx - 1].id]), 1) : addDays(rangeStart, 1);
+    const hi  = idx < milestones.length - 1 ? addDays(parse(dates[milestones[idx + 1].id]), -1) : rangeEnd;
     const clamped = new Date(Math.max(lo.getTime(), Math.min(hi.getTime(), newDate.getTime())));
 
     onChange({ ...dates, [drag.id]: iso(clamped) });
@@ -106,6 +111,41 @@ export default function GanttChart({ milestones, dates, onChange }: Props) {
   function onSvgUp() {
     dragRef.current = null;
     setIsDragging(false);
+  }
+
+  // ── RACI colour helper ───────────────────────────────────
+  function barColor(id: string): string {
+    if (!raci) return C_BRAND;
+    const row  = raci[id];
+    if (!row) return C_BRAND;
+    const vals = Object.values(row);
+    const hasR = vals.includes("R");
+    const hasA = vals.includes("A");
+    if (hasR && hasA) return C_OK;
+    if (hasR || hasA)  return C_RISK;
+    return C_BRAND;
+  }
+
+  function raciDotFill(id: string): string {
+    if (!raci) return "none";
+    const row  = raci[id];
+    if (!row) return "none";
+    const vals = Object.values(row);
+    const hasR = vals.includes("R");
+    const hasA = vals.includes("A");
+    if (hasR && hasA) return C_OK;
+    if (hasR || hasA)  return C_RISK;
+    return "none";
+  }
+
+  function raciDotStroke(id: string): string {
+    if (!raci) return "none";
+    const row  = raci[id];
+    if (!row) return C_MUTED;
+    const vals = Object.values(row);
+    if (vals.includes("R") && vals.includes("A")) return C_OK;
+    if (vals.includes("R") || vals.includes("A"))  return C_RISK;
+    return C_MUTED;
   }
 
   return (
@@ -176,6 +216,8 @@ export default function GanttChart({ milestones, dates, onChange }: Props) {
           const x2     = dateToX(target);
           const barW   = Math.max(HANDLE_W + 2, x2 - x1);
           const isHov  = hoveredId === m.id;
+          const bc     = barColor(m.id);
+          const clickable = !!onBarClick;
 
           return (
             <g key={m.id}>
@@ -186,16 +228,6 @@ export default function GanttChart({ milestones, dates, onChange }: Props) {
               {/* Row top border */}
               <line x1={0} y1={rowY} x2={SVG_W} y2={rowY} stroke={C_BORDER} strokeWidth={0.5} />
 
-              {/* Milestone label */}
-              <text
-                x={LABEL_W - 14} y={rowY + ROW_H / 2 + 4.5}
-                textAnchor="end"
-                fill={C_TEXT} fontSize={12.5}
-                fontFamily="'IBM Plex Sans', sans-serif" fontWeight="500"
-              >
-                {m.label}
-              </text>
-
               {/* Milestone number badge */}
               <text
                 x={8} y={rowY + ROW_H / 2 + 4}
@@ -205,11 +237,38 @@ export default function GanttChart({ milestones, dates, onChange }: Props) {
                 {String(i + 1).padStart(2, "0")}
               </text>
 
-              {/* Bar body */}
+              {/* RACI status dot (shown when raci prop is provided) */}
+              {raci && (
+                <circle
+                  cx={LABEL_W - 10}
+                  cy={rowY + ROW_H / 2}
+                  r={4}
+                  fill={raciDotFill(m.id)}
+                  stroke={raciDotStroke(m.id)}
+                  strokeWidth={1.5}
+                />
+              )}
+
+              {/* Milestone label */}
+              <text
+                x={LABEL_W - (raci ? 20 : 14)} y={rowY + ROW_H / 2 + 4}
+                textAnchor="end"
+                fill={C_TEXT} fontSize={12.5}
+                fontFamily="'IBM Plex Sans', sans-serif" fontWeight="500"
+              >
+                {m.label}
+              </text>
+
+              {/* Bar body — clickable when onBarClick provided */}
               <rect
                 x={LABEL_W + x1} y={barY}
                 width={barW} height={BAR_H} rx={4}
-                fill={C_BRAND} opacity={isHov ? 1 : 0.88}
+                fill={bc}
+                opacity={isHov ? 1 : 0.88}
+                onClick={() => onBarClick?.(m.id)}
+                onPointerEnter={() => setHoveredId(m.id)}
+                onPointerLeave={() => { if (!dragRef.current) setHoveredId(null); }}
+                style={{ cursor: clickable ? "pointer" : "default" }}
               />
 
               {/* Date label inside bar (if wide enough) */}
@@ -224,7 +283,21 @@ export default function GanttChart({ milestones, dates, onChange }: Props) {
                 </text>
               )}
 
-              {/* Date label to the right of handle (always visible) */}
+              {/* "Set RACI" hint when raci prop present but not configured */}
+              {raci && !Object.values(raci[m.id] ?? {}).some(Boolean) && isHov && (
+                <text
+                  x={LABEL_W + x1 + (barW > 90 ? barW / 2 : barW + 5)}
+                  y={barY + BAR_H / 2 + 4}
+                  textAnchor={barW > 90 ? "middle" : "start"}
+                  fill="white" fontSize={9.5} opacity={0.85}
+                  fontFamily="'IBM Plex Mono', monospace"
+                  style={{ pointerEvents: "none" }}
+                >
+                  click to set RACI
+                </text>
+              )}
+
+              {/* Date label to the right of handle */}
               <text
                 x={LABEL_W + x2 + HANDLE_W / 2 + 6}
                 y={barY + BAR_H / 2 + 4}
@@ -241,11 +314,11 @@ export default function GanttChart({ milestones, dates, onChange }: Props) {
               <rect
                 x={LABEL_W + x2 - HANDLE_W / 2} y={barY - 2}
                 width={HANDLE_W} height={BAR_H + 4} rx={3}
-                fill={isHov ? C_ACCENT : C_BRAND}
+                fill={isHov ? C_ACCENT : bc}
                 style={{ cursor: "ew-resize" }}
                 onPointerDown={(e) => onHandleDown(e, m.id)}
                 onPointerEnter={() => setHoveredId(m.id)}
-                onPointerLeave={() => setHoveredId(null)}
+                onPointerLeave={() => { if (!dragRef.current) setHoveredId(null); }}
               />
 
               {/* Grip dots */}
