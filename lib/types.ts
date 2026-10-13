@@ -2,7 +2,7 @@
 
 export type TransactionType = "lease" | "acquire" | "sell";
 export type MilestoneStatus = "complete" | "in-progress" | "pending" | "late";
-export type PartyRole = "landlord" | "tenant" | "landlord-solicitor" | "tenant-solicitor" | "agent";
+export type PartyRole = "landlord" | "tenant" | "landlord-solicitor" | "tenant-solicitor" | "ll-agent" | "t-agent";
 export type RaciRole = "R" | "A" | "C" | "I" | null;
 
 export interface Party {
