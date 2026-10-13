@@ -34,40 +34,5 @@ export async function POST(req: NextRequest) {
   const text: string = typeof body.text === "string" ? body.text : "";
   if (!text.trim()) return NextResponse.json({ error: "empty" }, { status: 400 });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return NextResponse.json(regexParse(text));
-
-  try {
-    const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const client = new Anthropic({ apiKey });
-
-    const msg = await client.messages.create({
-      model: "claude-haiku-4-5",
-      max_tokens: 200,
-      system: `Extract the party from this description. Return ONLY valid JSON with these fields:
-{"name":"","contact":"","role":"","email":""}
-
-Role must be one of: landlord, tenant, landlord-solicitor, tenant-solicitor, ll-agent, t-agent
-- solicitor acting for the landlord/owner → landlord-solicitor
-- solicitor acting for the tenant/occupier → tenant-solicitor
-- agent acting for the landlord → ll-agent
-- agent acting for the tenant → t-agent
-"from X" → contact = X (the organisation)
-Return only the JSON object, no markdown, no explanation.`,
-      messages: [{ role: "user", content: text }],
-    });
-
-    const raw = msg.content[0].type === "text" ? msg.content[0].text : "";
-    const clean = raw.replace(/```[a-z]*/gi, "").replace(/```/g, "").trim();
-    const json = JSON.parse(clean);
-
-    return NextResponse.json({
-      name:    String(json.name    ?? ""),
-      contact: String(json.contact ?? ""),
-      role:    ROLES.includes(json.role) ? (json.role as Role) : "tenant",
-      email:   String(json.email   ?? ""),
-    });
-  } catch {
-    return NextResponse.json(regexParse(text));
-  }
+  return NextResponse.json(regexParse(text));
 }
