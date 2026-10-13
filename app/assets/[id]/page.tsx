@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic";
-
 import { notFound } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import AssetClient from "./AssetClient";
